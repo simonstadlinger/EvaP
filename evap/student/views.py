@@ -73,11 +73,15 @@ def vote(request, course_id):
 
         course_form_group = form_groups.pop(course.general_contribution)
 
+        course_form_group_top = [questions_form for questions_form in course_form_group if not questions_form.questionnaire.bottom]
+        course_form_group_bottom = [questions_form for questions_form in course_form_group if questions_form.questionnaire.bottom]
+
         contributor_form_groups = list((contribution.contributor, contribution.label, form_group, helper_has_errors(form_group)) for contribution, form_group in form_groups.items())
 
         template_data = dict(
             errors_exist=errors_exist,
-            course_form_group=course_form_group,
+            course_form_group_top=course_form_group_top,
+            course_form_group_bottom=course_form_group_bottom,
             contributor_form_groups=contributor_form_groups,
             course=course,
             participants_warning=course.num_participants <= 5,

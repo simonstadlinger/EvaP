@@ -117,6 +117,8 @@ class Questionnaire(models.Model, metaclass=LocalizeModelBase):
     staff_only = models.BooleanField(verbose_name=_("display for staff only"), default=False)
     obsolete = models.BooleanField(verbose_name=_("obsolete"), default=False)
 
+    bottom = models.BooleanField(default=False)
+
     class Meta:
         ordering = ('is_for_contributors', 'index', 'name_de')
         verbose_name = _("questionnaire")

@@ -41,7 +41,7 @@
                 {% trans "Questions about the course" %}
             </div>
             <div class="card-body">
-                {% include "student_vote_questionnaire_group.html" with questionnaire_group=course_form_group preview=preview %}
+                {% include "student_vote_questionnaire_group.html" with questionnaire_group=course_form_group_top preview=preview %}
             </div>
         </div>
         {% if contributor_form_groups %}
@@ -76,6 +76,14 @@
                 </div>
             </div>
         {% endif %}
+        <div class="card card-outline-primary mb-3">
+            <div class="card-header">
+                {% trans "Questions about the course" %}
+            </div>
+            <div class="card-body">
+                {% include "student_vote_questionnaire_group.html" with questionnaire_group=course_form_group_top preview=preview %}
+            </div>
+        </div>
         {% if not for_rendering_in_modal %}
         <div class="card card-submit-area {% if not preview %}card-submit-area-2 {% endif %}text-center mb-3">
             <div class="card-body">

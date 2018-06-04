@@ -1,8 +1,12 @@
 from collections import OrderedDict, namedtuple
 
+from evap.evaluation.auth import staff_required
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, render
 from django.contrib.auth.decorators import login_required
+from django.forms import formset_factory
+from django.http import HttpResponse
+from django.utils.translation import ugettext as _
 
 from evap.evaluation.models import Semester, Degree, Contribution
 from evap.results.tools import calculate_results, calculate_average_grades_and_deviation, TextResult, RatingResult, COMMENT_STATES_REQUIRED_FOR_VISIBILITY
@@ -121,6 +125,53 @@ def course_detail(request, semester_id, course_id):
             public_view=public_view)
     return render(request, "results_course_detail.html", template_data)
 
+
+@staff_required
+def semester_raw_export(request, semester_id):
+    semester = get_object_or_404(Semester, id=semester_id)
+
+    filename = "Evaluation-{}-{}_raw.csv".format(semester.name, get_language())
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = "attachment; filename=\"{}\"".format(filename)
+
+    writer = csv.writer(response, delimiter=";")
+    writer.writerow([_('Name'), _('Degrees'), _('Type'), _('Single result'), _('State'), _('#Voters'),
+        _('#Participants'), _('#Comments'), _('Average grade')])
+    for course in semester.course_set.all():
+        degrees = ", ".join([degree.name for degree in course.degrees.all()])
+        course.avg_grade, course.avg_deviation = calculate_average_grades_and_deviation(course)
+        if course.state in ['evaluated', 'reviewed', 'published'] and course.avg_grade is not None:
+            avg_grade = "{:.1f}".format(course.avg_grade)
+        else:
+            avg_grade = ""
+        writer.writerow([course.name, degrees, course.type.name, course.is_single_result, course.state,
+            course.num_voters, course.num_participants, course.textanswer_set.count(), avg_grade])
+
+    return response
+
+
+@staff_required
+def semester_export(request, semester_id):
+    semester = get_object_or_404(Semester, id=semester_id)
+
+    ExportSheetFormset = formset_factory(form=ExportSheetForm, can_delete=True, extra=0, min_num=1, validate_min=True)
+    formset = ExportSheetFormset(request.POST or None, form_kwargs={'semester': semester})
+
+    if formset.is_valid():
+        include_not_enough_answers = request.POST.get('include_not_enough_answers') == 'on'
+        include_unpublished = request.POST.get('include_unpublished') == 'on'
+        course_types_list = []
+        for form in formset:
+            if 'selected_course_types' in form.cleaned_data:
+                course_types_list.append(form.cleaned_data['selected_course_types'])
+
+        filename = "Evaluation-{}-{}.xls".format(semester.name, get_language())
+        response = HttpResponse(content_type="application/vnd.ms-excel")
+        response["Content-Disposition"] = "attachment; filename=\"{}\"".format(filename)
+        ExcelExporter(semester).export(response, course_types_list, include_not_enough_answers, include_unpublished)
+        return response
+    else:
+        return render(request, "staff_semester_export.html", dict(semester=semester, formset=formset))
 
 def user_can_see_text_answer(user, represented_users, text_answer, public_view=False):
     if public_view:

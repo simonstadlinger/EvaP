@@ -288,7 +288,7 @@ class ContributionForm(forms.ModelForm):
             'contributor': UserModelChoiceField,
         }
 
-    def __init__(self, *args, course=None, **kwargs):
+    def __init__(self, course=None, *args, **kwargs):
         self.course = course
         # work around https://code.djangoproject.com/ticket/25880
         if self.course is None:
@@ -334,7 +334,7 @@ class CourseEmailForm(forms.Form):
     subject = forms.CharField(label=_("Subject"))
     body = forms.CharField(widget=forms.Textarea(), label=_("Message"))
 
-    def __init__(self, *args, course, export=False, **kwargs):
+    def __init__(self, course, export=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.template = EmailTemplate()
         self.course = course
@@ -366,7 +366,7 @@ class RemindResponsibleForm(forms.Form):
     subject = forms.CharField(label=_("Subject"))
     body = forms.CharField(widget=forms.Textarea(), label=_("Message"))
 
-    def __init__(self, *args, responsible, **kwargs):
+    def __init__(self, responsible, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['to'].initial = responsible.pk
         self.fields['to'].queryset = UserProfile.objects.filter(pk=responsible.pk)

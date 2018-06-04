@@ -33,3 +33,6 @@ htmlcov
 
 # pip puts editable packages here
 src
+
+[flake8]
+ignore=E501,E126,E128,W391

@@ -82,9 +82,9 @@ def custom_redirect(url_name, *args, **kwargs):
     return HttpResponseRedirect(url + "?%s" % params)
 
 
-def delete_navbar_cache():
+def delete_navbar_cache_for_users(users):
     # delete navbar cache from base.html
-    for user in UserProfile.objects.all():
+    for user in users:
         key = make_template_fragment_key('navbar', [user.username, 'de'])
         cache.delete(key)
         key = make_template_fragment_key('navbar', [user.username, 'en'])
@@ -92,7 +92,7 @@ def delete_navbar_cache():
 
 
 def bulk_delete_users(request, username_file, test_run):
-    usernames = [u.strip() for u in username_file.readlines()]
+    usernames = [u.decode().strip() for u in username_file.readlines()]
     users = UserProfile.objects.exclude(username__in=usernames)
     deletable_users = [u for u in users if u.can_staff_delete]
     users_to_mark_inactive = [u for u in users if u.is_active and not u.can_staff_delete and u.can_staff_mark_inactive]

@@ -1,5 +1,6 @@
 from collections import OrderedDict, defaultdict
-from datetime import datetime
+import datetime
+import operator
 
 from django.conf import settings
 from django.contrib.auth import user_logged_in
@@ -64,14 +65,6 @@ STATE_DESCRIPTIONS = OrderedDict((
     ('published', _('The results for this course have been published.'))
 ))
 
-# the names used for students
-STUDENT_STATES_ORDERED = OrderedDict((
-    ('in_evaluation', _('in evaluation')),
-    ('upcoming', _('upcoming')),
-    ('evaluationFinished', _('evaluation finished')),
-    ('published', _('published'))
-))
-
 
 def questionnaires_and_contributions(course):
     """Yields tuples of (questionnaire, contribution) for the given course."""
@@ -99,14 +92,14 @@ def send_publish_notifications(courses, template=None):
         template = EmailTemplate.objects.get(name=EmailTemplate.PUBLISHING_NOTICE)
 
     for course in courses:
-        # for published courses all contributors and participants get a notification
-        if course.can_publish_grades:
+        # for courses with published grades, all contributors and participants get a notification
+        if course.has_enough_voters_to_publish_grades:
             for participant in course.participants.all():
                 publish_notifications[participant].add(course)
             for contribution in course.contributions.all():
                 if contribution.contributor:
                     publish_notifications[contribution.contributor].add(course)
-        # if a course was not published notifications are only sent for contributors who can see comments
+        # if the grades were not published, notifications are only sent for contributors who can see comments
         elif len(course.textanswer_set) > 0:
             for textanswer in course.textanswer_set:
                 if textanswer.contribution.contributor:
@@ -132,7 +125,7 @@ def course_types_in_semester(semester):
 
 
 def date_to_datetime(date):
-    return datetime(year=date.year, month=date.month, day=date.day)
+    return datetime.datetime(year=date.year, month=date.month, day=date.day)
 
 
 @receiver(user_logged_in)
@@ -143,3 +136,14 @@ def set_or_get_language(sender, user, request, **kwargs):
     else:
         user.language = get_language()
         user.save()
+
+
+def get_due_courses_for_user(user):
+    from evap.evaluation.models import Course
+    due_courses = dict()
+    for course in Course.objects.filter(participants=user, state='in_evaluation').exclude(voters=user):
+        due_courses[course] = (course.vote_end_date - datetime.date.today()).days
+
+    # Sort courses by number of days left for evaluation and bring them to following format:
+    # [(course, due_in_days), ...]
+    return sorted(due_courses.items(), key=operator.itemgetter(1))

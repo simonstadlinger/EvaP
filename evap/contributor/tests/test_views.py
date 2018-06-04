@@ -1,7 +1,7 @@
 from model_mommy import mommy
 
 from evap.evaluation.models import Course, UserProfile
-from evap.evaluation.tests.tools import ViewTest, course_with_responsible_and_editor
+from evap.evaluation.tests.tools import ViewTest, create_course_with_responsible_and_editor
 
 TESTING_COURSE_ID = 2
 
@@ -12,7 +12,7 @@ class TestContributorView(ViewTest):
 
     @classmethod
     def setUpTestData(cls):
-        course_with_responsible_and_editor()
+        create_course_with_responsible_and_editor()
 
 
 class TestContributorSettingsView(ViewTest):
@@ -21,7 +21,7 @@ class TestContributorSettingsView(ViewTest):
 
     @classmethod
     def setUpTestData(cls):
-        course_with_responsible_and_editor()
+        create_course_with_responsible_and_editor()
 
     def test_save_settings(self):
         user = mommy.make(UserProfile)
@@ -30,7 +30,7 @@ class TestContributorSettingsView(ViewTest):
         form["delegates"] = [user.pk]
         form.submit()
 
-        self.assertEquals(list(UserProfile.objects.get(username='responsible').delegates.all()), [user])
+        self.assertEqual(list(UserProfile.objects.get(username='responsible').delegates.all()), [user])
 
 
 class TestContributorCourseView(ViewTest):
@@ -39,12 +39,23 @@ class TestContributorCourseView(ViewTest):
 
     @classmethod
     def setUpTestData(cls):
-        cls.course = course_with_responsible_and_editor(course_id=TESTING_COURSE_ID)
-
+        create_course_with_responsible_and_editor(course_id=TESTING_COURSE_ID)
+    
+    def setUp(self):
+        self.course = Course.objects.get(pk=TESTING_COURSE_ID)
+    
     def test_wrong_state(self):
         self.course.revert_to_new()
         self.course.save()
         self.get_assert_403(self.url, 'responsible')
+ 
+    def test_information_message(self):
+        self.course.editor_approve()
+        self.course.save()
+
+        page = self.app.get(self.url, user='editor')
+        self.assertContains(page, "You cannot edit this course because it has already been approved")
+        self.assertNotContains(page, "Please review the course's details below, add all contributors and select suitable questionnaires. Once everything is okay, please approve the course on the bottom of the page.")
 
 
 class TestContributorCoursePreviewView(ViewTest):
@@ -53,7 +64,7 @@ class TestContributorCoursePreviewView(ViewTest):
 
     @classmethod
     def setUpTestData(cls):
-        cls.course = course_with_responsible_and_editor(course_id=TESTING_COURSE_ID)
+        cls.course = create_course_with_responsible_and_editor(course_id=TESTING_COURSE_ID)
 
     def setUp(self):
         self.course = Course.objects.get(pk=TESTING_COURSE_ID)
@@ -70,7 +81,7 @@ class TestContributorCourseEditView(ViewTest):
 
     @classmethod
     def setUpTestData(cls):
-        cls.course = course_with_responsible_and_editor(course_id=TESTING_COURSE_ID)
+        cls.course = create_course_with_responsible_and_editor(course_id=TESTING_COURSE_ID)
 
     def setUp(self):
         self.course = Course.objects.get(pk=TESTING_COURSE_ID)
@@ -141,3 +152,23 @@ class TestContributorCourseEditView(ViewTest):
         response = form.submit(name="operation", value="preview")
         self.assertIn("previewModal", response)
         self.assertNotIn("The preview could not be rendered", response)
+
+    def test_contact_modal_escape(self):
+        """
+            Asserts that the course title is correctly escaped in the contact modal.
+            Regression test for #1060
+        """
+        self.course.name_en = "Adam & Eve"
+        self.course.save()
+        page = self.get_assert_200(self.url, user="responsible")
+
+        self.assertIn("changeParticipantRequestModalLabel", page)
+
+        self.assertNotIn("Adam &amp;amp; Eve", page)
+        self.assertIn("Adam &amp; Eve", page)
+        self.assertNotIn("Adam & Eve", page)
+
+    def test_information_message(self):
+        page = self.app.get(self.url, user='editor')
+        self.assertNotContains(page, "You cannot edit this course because it has already been approved")
+        self.assertContains(page, "Please review the course's details below, add all contributors and select suitable questionnaires. Once everything is okay, please approve the course on the bottom of the page.")

@@ -1,13 +1,14 @@
 # EvaP - Evaluation Platform
 
 [![build status](https://travis-ci.org/fsr-itse/EvaP.svg)](https://travis-ci.org/fsr-itse/EvaP)
-[![Dependency Status](https://gemnasium.com/fsr-itse/EvaP.svg)](https://gemnasium.com/fsr-itse/EvaP)
-[![Code Health](https://landscape.io/github/fsr-itse/EvaP/master/landscape.png)](https://landscape.io/github/fsr-itse/EvaP/master)
+[![Requirements Status](https://requires.io/github/fsr-itse/EvaP/requirements.svg?branch=master)](https://requires.io/github/fsr-itse/EvaP/requirements/?branch=master)
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/4721b900582d4ca1b0392af26f5f5c7b)](https://www.codacy.com/app/evap/EvaP?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=fsr-itse/EvaP&amp;utm_campaign=Badge_Grade)
 [![Code Coverage](https://coveralls.io/repos/github/fsr-itse/EvaP/badge.svg?branch=master)](https://coveralls.io/github/fsr-itse/EvaP?branch=master)
+
 
 ## What is EvaP?
 
-EvaP is the course evaluation system used internally at Hasso Plattner Institute.
+EvaP is the course evaluation system used internally at Hasso Plattner Institute at the University of Potsdam.
 
 For the documentation, please see our [wiki](https://github.com/fsr-itse/EvaP/wiki).
 
@@ -20,7 +21,7 @@ The easiest setup using [Vagrant](https://www.vagrantup.com) and [VirtualBox](ht
 
 1. Fork the Evap repository (using the Fork-button in the upper right corner on GitHub)
 
-2. Run the following commands on the command line to clone the repository, create the Vagrant VM and run the Django development server::
+2. Run the following commands on the command line to clone the repository, create the Vagrant VM and run the Django development server:
 
         git clone --recurse-submodules https://github.com/<your_github_username>/EvaP.git
         cd EvaP
@@ -42,3 +43,8 @@ We'd love to see contributions, feel free to fork! You should probably branch of
 ## License
 
 MIT, see [LICENSE.md](LICENSE.md).
+
+
+## Supported Browsers
+
+The platform is only tested in Mozilla Firefox and Google Chrome. Other browsers might not render all pages correctly.

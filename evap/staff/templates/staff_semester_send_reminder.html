@@ -1,10 +1,10 @@
-{% extends "staff_course_base.html" %}
+{% extends 'staff_course_base.html' %}
 
 {% load evaluation_filters %}
 
 {% block breadcrumb %}
     {{ block.super }}
-    <li class="breadcrumb-item"><a href="{% url 'staff:semester_todo' semester.id %}">{% trans "Todo" %}</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'staff:semester_todo' semester.id %}">{% trans 'Todo' %}</a></li>
     <li class="breadcrumb-item">{{ responsible }}</li>
 {% endblock %}
 
@@ -12,16 +12,20 @@
     {{ block.super }}
     <form id="send-reminder-form" method="POST" class="form-horizontal">
         {% csrf_token %}
-        <fieldset>
-            <div class="email-form">
-                {% for field in form %}
-                    {% include "bootstrap_form_field.html" with field=field %}
-                {% endfor %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <fieldset>
+                    <div class="email-form">
+                        {% for field in form %}
+                            {% include 'bootstrap_form_field.html' with field=field %}
+                        {% endfor %}
+                    </div>
+                </fieldset>
             </div>
-        </fieldset>
+        </div>
         <div class="card card-submit-area text-center mb-3">
             <div class="card-body">
-                <button type="submit" class="btn btn-primary">{% trans "Send email" %}</button>
+                <button type="submit" class="btn btn-primary">{% trans 'Send email' %}</button>
             </div>
         </div>
     </form>

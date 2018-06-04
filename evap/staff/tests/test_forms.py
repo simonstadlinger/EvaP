@@ -3,11 +3,58 @@ from django.test import TestCase
 from model_mommy import mommy
 
 from evap.evaluation.models import UserProfile, CourseType, Course, Questionnaire, \
-    Contribution, Semester, Degree, EmailTemplate
-from evap.evaluation.tests.tools import get_form_data_from_instance, course_with_responsible_and_editor, to_querydict
+    Contribution, Semester, Degree, EmailTemplate, Question
+from evap.evaluation.tests.tools import get_form_data_from_instance, create_course_with_responsible_and_editor, to_querydict
 from evap.staff.forms import UserForm, SingleResultForm, ContributionFormSet, ContributionForm, CourseForm, \
-    CourseEmailForm
+    CourseEmailForm, QuestionnaireForm
 from evap.contributor.forms import CourseForm as ContributorCourseForm
+
+
+class QuestionnaireFormTest(TestCase):
+    def test_force_highest_order(self):
+        mommy.make(Questionnaire, order=45, type=Questionnaire.TOP)
+
+        question = mommy.make(Question)
+
+        data = {
+            'description_de': 'English description',
+            'description_en': 'German description',
+            'name_de': 'A name',
+            'name_en': 'A german name',
+            'public_name_en': 'A display name',
+            'public_name_de': 'A german display name',
+            'question_set-0-id': question.id,
+            'order': 0,
+            'type': Questionnaire.TOP,
+        }
+
+        form = QuestionnaireForm(data=data)
+        self.assertTrue(form.is_valid())
+        questionnaire = form.save(force_highest_order=True)
+        self.assertEqual(questionnaire.order, 46)
+
+    def test_automatic_order_correction_on_type_change(self):
+        mommy.make(Questionnaire, order=72, type=Questionnaire.BOTTOM)
+
+        questionnaire = mommy.make(Questionnaire, order=7, type=Questionnaire.TOP)
+        question = mommy.make(Question)
+
+        data = {
+            'description_de': questionnaire.description_de,
+            'description_en': questionnaire.description_en,
+            'name_de': questionnaire.name_de,
+            'name_en': questionnaire.name_en,
+            'public_name_en': questionnaire.public_name_en,
+            'public_name_de': questionnaire.public_name_de,
+            'question_set-0-id': question.id,
+            'order': questionnaire.order,
+            'type': Questionnaire.BOTTOM,
+        }
+
+        form = QuestionnaireForm(instance=questionnaire, data=data)
+        self.assertTrue(form.is_valid())
+        questionnaire = form.save()
+        self.assertEqual(questionnaire.order, 73)
 
 
 class CourseEmailFormTests(TestCase):
@@ -16,7 +63,7 @@ class CourseEmailFormTests(TestCase):
         """
             Tests the CourseEmailForm with one valid and one invalid input dataset.
         """
-        course = course_with_responsible_and_editor()
+        course = create_course_with_responsible_and_editor()
         mommy.make(Contribution, course=course)
         data = {"body": "wat", "subject": "some subject", "recipients": [EmailTemplate.DUE_PARTICIPANTS]}
         form = CourseEmailForm(course=course, data=data)
@@ -156,7 +203,7 @@ class ContributionFormsetTests(TestCase):
         user1 = mommy.make(UserProfile)
         user2 = mommy.make(UserProfile)
         mommy.make(UserProfile)
-        questionnaire = mommy.make(Questionnaire, is_for_contributors=True)
+        questionnaire = mommy.make(Questionnaire, type=Questionnaire.CONTRIBUTOR)
 
         ContributionFormset = inlineformset_factory(Course, Contribution, formset=ContributionFormSet, form=ContributionForm, extra=0)
 
@@ -181,11 +228,12 @@ class ContributionFormsetTests(TestCase):
         data['contributions-1-course'] = course.pk
         data['contributions-1-questionnaires'] = questionnaire.pk
         data['contributions-1-order'] = 1
+        data['contributions-1-comment_visibility'] = "ALL"
         self.assertFalse(ContributionFormset(instance=course, form_kwargs={'course': course}, data=data).is_valid())
         # two responsibles
         data['contributions-1-contributor'] = user2.pk
         data['contributions-1-responsibility'] = "RESPONSIBLE"
-        self.assertFalse(ContributionFormset(instance=course, form_kwargs={'course': course}, data=data).is_valid())
+        self.assertTrue(ContributionFormset(instance=course, form_kwargs={'course': course}, data=data).is_valid())
 
     def test_dont_validate_deleted_contributions(self):
         """
@@ -196,22 +244,22 @@ class ContributionFormsetTests(TestCase):
         user1 = mommy.make(UserProfile)
         user2 = mommy.make(UserProfile)
         mommy.make(UserProfile)
-        questionnaire = mommy.make(Questionnaire, is_for_contributors=True)
+        questionnaire = mommy.make(Questionnaire, type=Questionnaire.CONTRIBUTOR)
 
         contribution_formset = inlineformset_factory(Course, Contribution, formset=ContributionFormSet, form=ContributionForm, extra=0)
 
-        # Here we have two responsibles (one of them deleted), and a deleted contributor with no questionnaires.
+        # Here we have two responsibles (one of them deleted with no questionnaires), and a deleted contributor with no questionnaires.
+
         data = to_querydict({
             'contributions-TOTAL_FORMS': 3,
             'contributions-INITIAL_FORMS': 0,
             'contributions-MAX_NUM_FORMS': 5,
             'contributions-0-course': course.pk,
-            'contributions-0-questionnaires': questionnaire.pk,
+            'contributions-0-questionnaires': "",
             'contributions-0-order': 0,
             'contributions-0-responsibility': "RESPONSIBLE",
             'contributions-0-comment_visibility': "ALL",
             'contributions-0-contributor': user1.pk,
-            'contributions-0-DELETE': 'on',
             'contributions-1-course': course.pk,
             'contributions-1-questionnaires': questionnaire.pk,
             'contributions-1-order': 0,
@@ -224,11 +272,60 @@ class ContributionFormsetTests(TestCase):
             'contributions-2-responsibility': "CONTRIBUTOR",
             'contributions-2-comment_visibility': "OWN",
             'contributions-2-contributor': user2.pk,
-            'contributions-2-DELETE': 'on',
         })
 
+        # Without deletion, this form should be invalid
+        formset = contribution_formset(instance=course, form_kwargs={'course': course}, data=data)
+        self.assertFalse(formset.is_valid())
+
+        data['contributions-0-DELETE'] = 'on'
+        data['contributions-2-DELETE'] = 'on'
+
+        # With deletion, it should be valid
         formset = contribution_formset(instance=course, form_kwargs={'course': course}, data=data)
         self.assertTrue(formset.is_valid())
+
+    def test_deleted_empty_contribution_does_not_crash(self):
+        """
+            When removing the empty extra contribution formset, validating the form should not crash.
+            Similarly, when removing the contribution formset of an existing contributor, and entering some data in the extra formset, it should not crash.
+            Regression test for #1057
+        """
+        course = mommy.make(Course)
+        user1 = mommy.make(UserProfile)
+        questionnaire = mommy.make(Questionnaire, type=Questionnaire.CONTRIBUTOR)
+
+        contribution_formset = inlineformset_factory(Course, Contribution, formset=ContributionFormSet, form=ContributionForm, extra=0)
+
+        data = to_querydict({
+            'contributions-TOTAL_FORMS': 2,
+            'contributions-INITIAL_FORMS': 0,
+            'contributions-MAX_NUM_FORMS': 5,
+            'contributions-0-course': course.pk,
+            'contributions-0-questionnaires': questionnaire.pk,
+            'contributions-0-order': 0,
+            'contributions-0-responsibility': "RESPONSIBLE",
+            'contributions-0-comment_visibility': "ALL",
+            'contributions-0-contributor': user1.pk,
+            'contributions-1-course': course.pk,
+            'contributions-1-questionnaires': "",
+            'contributions-1-order': -1,
+            'contributions-1-responsibility': "CONTRIBUTOR",
+            'contributions-1-comment_visibility': "OWN",
+            'contributions-1-contributor': "",
+        })
+
+        # delete extra formset
+        data['contributions-1-DELETE'] = 'on'
+        formset = contribution_formset(instance=course, form_kwargs={'course': course}, data=data)
+        formset.is_valid()
+        data['contributions-1-DELETE'] = ''
+
+        # delete first, change data in extra formset
+        data['contributions-0-DELETE'] = 'on'
+        data['contributions-1-responsibility'] = 'RESPONSIBLE'
+        formset = contribution_formset(instance=course, form_kwargs={'course': course}, data=data)
+        formset.is_valid()
 
     def test_take_deleted_contributions_into_account(self):
         """
@@ -238,7 +335,7 @@ class ContributionFormsetTests(TestCase):
         """
         course = mommy.make(Course)
         user1 = mommy.make(UserProfile)
-        questionnaire = mommy.make(Questionnaire, is_for_contributors=True)
+        questionnaire = mommy.make(Questionnaire, type=Questionnaire.CONTRIBUTOR)
         contribution1 = mommy.make(Contribution, course=course, contributor=user1, responsible=True, can_edit=True,
                                    comment_visibility=Contribution.ALL_COMMENTS, questionnaires=[questionnaire])
 
@@ -276,9 +373,9 @@ class ContributionFormsetTests(TestCase):
             Regression test for #593.
         """
         course = mommy.make(Course)
-        questionnaire = mommy.make(Questionnaire, is_for_contributors=True, obsolete=False, staff_only=False)
-        questionnaire_obsolete = mommy.make(Questionnaire, is_for_contributors=True, obsolete=True, staff_only=False)
-        questionnaire_staff_only = mommy.make(Questionnaire, is_for_contributors=True, obsolete=False, staff_only=True)
+        questionnaire = mommy.make(Questionnaire, type=Questionnaire.CONTRIBUTOR, obsolete=False, staff_only=False)
+        questionnaire_obsolete = mommy.make(Questionnaire, type=Questionnaire.CONTRIBUTOR, obsolete=True, staff_only=False)
+        questionnaire_staff_only = mommy.make(Questionnaire, type=Questionnaire.CONTRIBUTOR, obsolete=False, staff_only=True)
 
         # The normal and staff_only questionnaire should be shown.
         contribution1 = mommy.make(Contribution, course=course, contributor=mommy.make(UserProfile), questionnaires=[])
@@ -311,7 +408,7 @@ class ContributionFormset775RegressionTests(TestCase):
         cls.user1 = mommy.make(UserProfile)
         cls.user2 = mommy.make(UserProfile)
         mommy.make(UserProfile)
-        cls.questionnaire = mommy.make(Questionnaire, is_for_contributors=True)
+        cls.questionnaire = mommy.make(Questionnaire, type=Questionnaire.CONTRIBUTOR)
         cls.contribution1 = mommy.make(Contribution, responsible=True, contributor=cls.user1, course=cls.course, can_edit=True, comment_visibility=Contribution.ALL_COMMENTS)
         cls.contribution2 = mommy.make(Contribution, contributor=cls.user2, course=cls.course)
 
@@ -364,7 +461,7 @@ class ContributionFormset775RegressionTests(TestCase):
         # make sure nothing crashes when an extra form is present.
         self.data['contributions-0-contributor'] = self.user2.pk
         self.data['contributions-1-contributor'] = self.user1.pk
-        self.data['contributions-2-TOTAL_FORMS'] = 3
+        self.data['contributions-TOTAL_FORMS'] = 3
         self.data['contributions-2-id'] = ""
         self.data['contributions-2-order'] = -1
         self.data['contributions-2-responsibility'] = "CONTRIBUTOR"
@@ -375,7 +472,7 @@ class ContributionFormset775RegressionTests(TestCase):
     def test_swap_contributors_with_extra_form(self):
         # moving a contributor to an extra form should work.
         # first, the second contributor is deleted and removed from self.data
-        self.contribution2.delete()
+        Contribution.objects.get(id=self.contribution2.id).delete()
         self.data['contributions-TOTAL_FORMS'] = 2
         self.data['contributions-INITIAL_FORMS'] = 1
         self.data['contributions-0-contributor'] = self.user2.pk
@@ -394,7 +491,7 @@ class ContributionFormset775RegressionTests(TestCase):
         self.data['contributions-0-contributor'] = self.user2.pk
         self.data['contributions-1-contributor'] = self.user1.pk
 
-        questionnaire = mommy.make(Questionnaire, is_for_contributors=True)
+        questionnaire = mommy.make(Questionnaire, type=Questionnaire.CONTRIBUTOR)
         self.data.appendlist('contributions-0-questionnaires', questionnaire.pk)
         formset = self.contribution_formset(instance=self.course, form_kwargs={'course': self.course}, data=self.data)
         formset.save()

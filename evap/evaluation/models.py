@@ -6,36 +6,23 @@ import uuid
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Group, PermissionsMixin
+from django.core.cache import caches
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.db import models, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Manager
 from django.dispatch import Signal, receiver
 from django.template import Context, Template
-from django.template.base import TemplateEncodingError, TemplateSyntaxError
+from django.template.base import TemplateSyntaxError
 from django.utils.functional import cached_property
 from django.utils.translation import ugettext_lazy as _
 from django_fsm import FSMField, transition
 from django_fsm.signals import post_transition
 # see evaluation.meta for the use of Translate in this file
 from evap.evaluation.meta import LocalizeModelBase, Translate
-from evap.evaluation.tools import date_to_datetime
-from evap.settings import EVALUATION_END_OFFSET_HOURS
+from evap.evaluation.tools import date_to_datetime, get_due_courses_for_user
 
 logger = logging.getLogger(__name__)
-
-
-# for converting state into student_state
-STUDENT_STATES_NAMES = {
-    'new': 'upcoming',
-    'prepared': 'upcoming',
-    'editor_approved': 'upcoming',
-    'approved': 'upcoming',
-    'in_evaluation': 'in_evaluation',
-    'evaluated': 'evaluationFinished',
-    'reviewed': 'evaluationFinished',
-    'published': 'published'
-}
 
 
 class NotArchiveable(Exception):
@@ -92,8 +79,26 @@ class Semester(models.Model, metaclass=LocalizeModelBase):
         return self == Semester.active_semester()
 
 
+class QuestionnaireManager(Manager):
+    def course_questionnaires(self):
+        return super().get_queryset().exclude(type=Questionnaire.CONTRIBUTOR)
+
+    def contributor_questionnaires(self):
+        return super().get_queryset().filter(type=Questionnaire.CONTRIBUTOR)
+
+
 class Questionnaire(models.Model, metaclass=LocalizeModelBase):
     """A named collection of questions."""
+
+    TOP = 10
+    CONTRIBUTOR = 20
+    BOTTOM = 30
+    TYPE_CHOICES = (
+        (TOP, _('Top questionnaire')),
+        (CONTRIBUTOR, _('Contributor questionnaire')),
+        (BOTTOM, _('Bottom questionnaire')),
+    )
+    type = models.IntegerField(choices=TYPE_CHOICES, verbose_name=_('type'), default=TOP)
 
     name_de = models.CharField(max_length=1024, unique=True, verbose_name=_("name (german)"))
     name_en = models.CharField(max_length=1024, unique=True, verbose_name=_("name (english)"))
@@ -111,14 +116,15 @@ class Questionnaire(models.Model, metaclass=LocalizeModelBase):
     teaser_en = models.TextField(verbose_name=_("teaser (english)"), blank=True, null=True)
     teaser = Translate
 
-    index = models.IntegerField(verbose_name=_("ordering index"), default=0)
+    order = models.IntegerField(verbose_name=_("ordering index"), default=0)
 
-    is_for_contributors = models.BooleanField(verbose_name=_("is for contributors"), default=False)
     staff_only = models.BooleanField(verbose_name=_("display for staff only"), default=False)
     obsolete = models.BooleanField(verbose_name=_("obsolete"), default=False)
 
+    objects = QuestionnaireManager()
+
     class Meta:
-        ordering = ('is_for_contributors', 'index', 'name_de')
+        ordering = ('type', 'order', 'name_de')
         verbose_name = _("questionnaire")
         verbose_name_plural = _("questionnaires")
 
@@ -126,10 +132,18 @@ class Questionnaire(models.Model, metaclass=LocalizeModelBase):
         return self.name
 
     def __lt__(self, other):
-        return (self.is_for_contributors, self.index) < (other.is_for_contributors, other.index)
+        return (self.type, self.order, self.name_de) < (other.type, other.order, self.name_de)
 
     def __gt__(self, other):
-        return (self.is_for_contributors, self.index) > (other.is_for_contributors, other.index)
+        return (self.type, self.order, self.name_de) > (other.type, other.order, self.name_de)
+
+    @property
+    def is_above_contributors(self):
+        return self.type == self.TOP
+
+    @property
+    def is_below_contributors(self):
+        return self.type == self.BOTTOM
 
     @property
     def can_staff_edit(self):
@@ -222,7 +236,10 @@ class Course(models.Model, metaclass=LocalizeModelBase):
     gets_no_grade_documents = models.BooleanField(verbose_name=_("gets no grade documents"), default=False)
 
     # whether participants must vote to qualify for reward points
-    is_required_for_reward = models.BooleanField(verbose_name=_("is required for reward"), default=True)
+    is_rewarded = models.BooleanField(verbose_name=_("is rewarded"), default=True)
+
+    # whether the evaluation does take place during the semester, stating that evaluation results will be published while the course is still running
+    is_midterm_evaluation = models.BooleanField(verbose_name=_("is midterm evaluation"), default=False)
 
     # students that are allowed to vote
     participants = models.ManyToManyField(settings.AUTH_USER_MODEL, verbose_name=_("participants"), blank=True, related_name='courses_participating_in')
@@ -262,7 +279,7 @@ class Course(models.Model, metaclass=LocalizeModelBase):
             self.contributions.create(contributor=None)
             del self.general_contribution  # invalidate cached property
 
-        assert self.vote_end_date >= self.vote_end_date
+        assert self.vote_end_date >= self.vote_start_datetime.date()
 
     @property
     def is_fully_reviewed(self):
@@ -271,7 +288,7 @@ class Course(models.Model, metaclass=LocalizeModelBase):
     @property
     def vote_end_datetime(self):
         # The evaluation ends at EVALUATION_END_OFFSET_HOURS:00 of the day AFTER self.vote_end_date.
-        return date_to_datetime(self.vote_end_date) + timedelta(hours=24 + EVALUATION_END_OFFSET_HOURS)
+        return date_to_datetime(self.vote_end_date) + timedelta(hours=24 + settings.EVALUATION_END_OFFSET_HOURS)
 
     @property
     def is_in_evaluation_period(self):
@@ -299,20 +316,33 @@ class Course(models.Model, metaclass=LocalizeModelBase):
             return True
         if self.is_user_contributor_or_delegate(user):
             return True
-        if self.is_private and user not in self.participants.all():
+        if user in self.participants.all():
+            return True
+        if self.is_private:
+            return False
+        if user.is_external:
             return False
         return True
 
-    def can_user_see_results(self, user):
+    def can_user_see_results_page(self, user):
         if user.is_reviewer:
             return True
         if self.state == 'published':
             if self.is_user_contributor_or_delegate(user):
                 return True
-            if not self.can_publish_grades:
+            if not self.has_enough_voters_to_publish_grades:
                 return False
             return self.can_user_see_course(user)
         return False
+
+    def can_user_see_grades(self, user):
+        if user.is_reviewer:
+            return True
+        if self.state != 'published':
+            return False
+        if not self.has_enough_voters_to_publish_grades:
+            return False
+        return self.can_user_see_course(user)
 
     @property
     def is_single_result(self):
@@ -331,12 +361,13 @@ class Course(models.Model, metaclass=LocalizeModelBase):
         return self.can_staff_edit and (not self.num_voters > 0 or self.is_single_result)
 
     @property
-    def can_publish_grades(self):
+    def has_enough_voters_to_publish_grades(self):
         from evap.results.tools import get_sum_of_answer_counters
         if self.is_single_result:
             return get_sum_of_answer_counters(self.ratinganswer_counters) > 0
 
-        return self.num_voters >= settings.MIN_ANSWER_COUNT and float(self.num_voters) / self.num_participants >= settings.MIN_ANSWER_PERCENTAGE
+        return (self.num_voters >= settings.VOTER_COUNT_NEEDED_FOR_PUBLISHING
+                and float(self.num_voters) / self.num_participants >= settings.VOTER_PERCENTAGE_NEEDED_FOR_PUBLISHING)
 
     @transition(field=state, source=['new', 'editor_approved'], target='prepared')
     def ready_for_editors(self):
@@ -350,7 +381,7 @@ class Course(models.Model, metaclass=LocalizeModelBase):
     def staff_approve(self):
         pass
 
-    @transition(field=state, source=['prepared', 'approved'], target='new')
+    @transition(field=state, source=['prepared', 'editor_approved', 'approved'], target='new')
     def revert_to_new(self):
         pass
 
@@ -384,11 +415,8 @@ class Course(models.Model, metaclass=LocalizeModelBase):
 
     @transition(field=state, source='published', target='reviewed')
     def unpublish(self):
-        pass
-
-    @property
-    def student_state(self):
-        return STUDENT_STATES_NAMES[self.state]
+        from evap.results.tools import get_results_cache_key
+        caches['results'].delete(get_results_cache_key(self))
 
     @cached_property
     def general_contribution(self):
@@ -417,13 +445,27 @@ class Course(models.Model, metaclass=LocalizeModelBase):
     def responsible_contributors(self):
         return UserProfile.objects.filter(contributions__course=self, contributions__responsible=True).order_by('contributions__order')
 
+    @cached_property
+    def num_contributors(self):
+        return UserProfile.objects.filter(contributions__course=self).count()
+
     @property
     def days_left_for_evaluation(self):
         return (self.vote_end_date - date.today()).days
 
     @property
+    def time_left_for_evaluation(self):
+        return self.vote_end_datetime - datetime.now()
+
+    def evaluation_ends_soon(self):
+        return 0 < self.time_left_for_evaluation.total_seconds() < settings.EVALUATION_END_WARNING_PERIOD * 3600
+
+    @property
     def days_until_evaluation(self):
-        return (self.vote_start_datetime.date() - date.today()).days
+        days_left = (self.vote_start_datetime.date() - date.today()).days
+        if self.vote_start_datetime < datetime.now():
+            days_left -= 1
+        return days_left
 
     def is_user_editor_or_delegate(self, user):
         if self.contributions.filter(can_edit=True, contributor=user).exists():
@@ -440,18 +482,6 @@ class Course(models.Model, metaclass=LocalizeModelBase):
         if self.contributions.filter(contributor__in=represented_users).exists():
             return True
         return False
-
-    def warnings(self):
-        result = []
-        if self.state in ['new', 'prepared', 'editor_approved'] and not self.all_contributions_have_questionnaires:
-            if not self.general_contribution_has_questionnaires:
-                result.append(_("Course has no questionnaires"))
-            else:
-                result.append(_("Not all contributors have questionnaires"))
-
-        if self.state in ['in_evaluation', 'evaluated', 'reviewed', 'published'] and not self.can_publish_grades:
-            result.append(_("Not enough participants to publish results"))
-        return result
 
     @property
     def textanswer_set(self):
@@ -593,11 +623,6 @@ class Contribution(models.Model):
         )
         ordering = ['order', ]
 
-    def clean(self):
-        # responsible contributors can always edit
-        if self.responsible:
-            self.can_edit = True
-
     def save(self, *args, **kw):
         super().save(*args, **kw)
         if self.responsible and not self.course.is_single_result:
@@ -617,6 +642,7 @@ class Question(models.Model, metaclass=LocalizeModelBase):
         ("G", _("Grade Question")),
         ("P", _("Positive Yes-No Question")),
         ("N", _("Negative Yes-No Question")),
+        ("H", _("Heading")),
     )
 
     order = models.IntegerField(verbose_name=_("question order"), default=-1)
@@ -668,6 +694,14 @@ class Question(models.Model, metaclass=LocalizeModelBase):
     @property
     def is_rating_question(self):
         return self.is_grade_question or self.is_likert_question or self.is_yes_no_question
+
+    @property
+    def is_non_grade_rating_question(self):
+        return self.is_rating_question and not self.is_grade_question
+
+    @property
+    def is_heading_question(self):
+        return self.type == "H"
 
 
 class Answer(models.Model):
@@ -872,16 +906,6 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
 
     objects = UserProfileManager()
 
-    # needed e.g. for compatibility with contrib.auth.admin
-    def get_full_name(self):
-        return self.full_name
-
-    # needed e.g. for compatibility with contrib.auth.admin
-    def get_short_name(self):
-        if self.first_name:
-            return self.first_name
-        return self.username
-
     @property
     def full_name(self):
         if self.last_name:
@@ -920,7 +944,7 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
 
     @property
     def can_staff_mark_inactive(self):
-        if self.is_reviewer or self.is_grade_publisher or self.is_staff or self.is_superuser:
+        if self.is_reviewer or self.is_grade_publisher or self.is_superuser:
             return False
         if any(not course.is_archived for course in self.courses_participating_in.all()):
             return False
@@ -933,7 +957,7 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
         states_with_votes = ["in_evaluation", "reviewed", "evaluated", "published"]
         if any(course.state in states_with_votes and not course.is_archived for course in self.courses_participating_in.all()):
             return False
-        if self.is_contributor or self.is_reviewer or self.is_grade_publisher or self.is_staff or self.is_superuser:
+        if self.is_contributor or self.is_reviewer or self.is_grade_publisher or self.is_superuser:
             return False
         if any(not user.can_staff_delete for user in self.represented_users.all()):
             return False
@@ -1046,7 +1070,7 @@ def validate_template(value):
     Django Template."""
     try:
         Template(value)
-    except (TemplateSyntaxError, TemplateEncodingError) as e:
+    except TemplateSyntaxError as e:
         raise ValidationError(str(e))
 
 
@@ -1120,7 +1144,7 @@ class EmailTemplate(models.Model):
 
         for user, courses in user_course_map.items():
             subject_params = {}
-            body_params = {'user': user, 'courses': courses}
+            body_params = {'user': user, 'courses': courses, 'due_courses': get_due_courses_for_user(user)}
             cls.send_to_user(user, template, subject_params, body_params, use_cc=use_cc, request=request)
 
     @classmethod

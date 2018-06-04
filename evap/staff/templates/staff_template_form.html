@@ -1,8 +1,8 @@
-{% extends "staff_base.html" %}
+{% extends 'staff_base.html' %}
 
 {% block breadcrumb %}
     {{ block.super }}
-    <li class="breadcrumb-item">{% trans "Templates" %}</li>
+    <li class="breadcrumb-item">{% trans 'Templates' %}</li>
     <li class="breadcrumb-item">{{ template.name }}</li>
 {% endblock %}
 
@@ -10,10 +10,14 @@
     {{ block.super }}
     <form id="template-form" method="POST" enctype="multipart/form-data" class="form-horizontal multiselect-form">
         {% csrf_token %}
-        {% include "bootstrap_form.html" with form=form %}
+        <div class="card mb-3">
+            <div class="card-body">
+                {% include 'bootstrap_form.html' with form=form %}
+            </div>
+        </div>
         <div class="card card-submit-area text-center mb-3">
             <div class="card-body">
-                <button type="submit" class="btn btn-primary">{% trans "Save template" %}</button>
+                <button type="submit" class="btn btn-primary">{% trans 'Save template' %}</button>
             </div>
         </div>
     </form>

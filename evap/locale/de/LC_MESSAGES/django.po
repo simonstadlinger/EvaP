@@ -1021,7 +1021,7 @@ msgid ""
 msgstr ""
 "Dieser Text wird im Fragebogen neben dem Namen des Mitwirkenden angezeigt."
 
-#: evap/evaluation/templates/course_form_general_questions.html:2
+#: evap/evaluation/templates/course_form_course_questions.html:2
 msgid "Course data"
 msgstr "Veranstaltungs-Informationen"
 

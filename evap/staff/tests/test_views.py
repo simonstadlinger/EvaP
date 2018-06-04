@@ -868,7 +868,7 @@ class TestCourseCreateView(ViewTest):
         form["degrees"] = ["1"]
         form["vote_start_datetime"] = "2099-01-01 00:00:00"
         form["vote_end_date"] = "2014-01-01"  # wrong order to get the validation error
-        form["general_questions"] = ["1"]
+        form["course_questions"] = ["1"]
 
         form['contributions-TOTAL_FORMS'] = 1
         form['contributions-INITIAL_FORMS'] = 0

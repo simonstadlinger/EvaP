@@ -15,17 +15,17 @@ logger = logging.getLogger(__name__)
 
 
 class CourseForm(forms.ModelForm):
-    general_questions = forms.ModelMultipleChoiceField(queryset=None, widget=CheckboxSelectMultiple, label=_("Questions about the course"))
+    course_questions = forms.ModelMultipleChoiceField(queryset=None, widget=CheckboxSelectMultiple, label=_("Questions about the course"))
     semester = forms.ModelChoiceField(Semester.objects.all(), disabled=True, required=False, widget=forms.HiddenInput())
 
     class Meta:
         model = Course
-        fields = ('name_de', 'name_en', 'vote_start_datetime', 'vote_end_date', 'type', 'degrees', 'general_questions', 'semester')
+        fields = ('name_de', 'name_en', 'vote_start_datetime', 'vote_end_date', 'type', 'degrees', 'course_questions', 'semester')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.fields['general_questions'].queryset = Questionnaire.objects.filter(is_for_contributors=False).filter(
+        self.fields['course_questions'].queryset = Questionnaire.objects.filter(is_for_contributors=False).filter(
             (Q(staff_only=False) & Q(obsolete=False)) | Q(contributions__course=self.instance)).distinct()
 
         self.fields['vote_start_datetime'].localize = True
@@ -34,7 +34,7 @@ class CourseForm(forms.ModelForm):
         self.fields['degrees'].help_text = ""
 
         if self.instance.general_contribution:
-            self.fields['general_questions'].initial = [q.pk for q in self.instance.general_contribution.questionnaires.all()]
+            self.fields['course_questions'].initial = [q.pk for q in self.instance.general_contribution.questionnaires.all()]
 
     def clean(self):
         super().clean()
@@ -65,7 +65,7 @@ class CourseForm(forms.ModelForm):
         user = kw.pop("user")
         self.instance.last_modified_user = user
         super().save(*args, **kw)
-        self.instance.general_contribution.questionnaires.set(self.cleaned_data.get('general_questions'))
+        self.instance.general_contribution.questionnaires.set(self.cleaned_data.get('course_questions'))
         logger.info('Course "{}" (id {}) was edited by contributor {}.'.format(self.instance, self.instance.id, user.username))
 
 

@@ -31,26 +31,26 @@ class TestVoteView(ViewTest):
 
         cls.course = mommy.make(Course, pk=1, participants=[cls.voting_user1, cls.voting_user2, cls.contributor1], state="in_evaluation")
 
-        cls.general_questionnaire = mommy.make(Questionnaire)
+        cls.course_questionnaire = mommy.make(Questionnaire)
         cls.contributor_questionnaire = mommy.make(Questionnaire)
 
         cls.contributor_text_question = mommy.make(Question, questionnaire=cls.contributor_questionnaire, type="T")
         cls.contributor_likert_question = mommy.make(Question, questionnaire=cls.contributor_questionnaire, type="L")
-        cls.general_text_question = mommy.make(Question, questionnaire=cls.general_questionnaire, type="T")
-        cls.general_likert_question = mommy.make(Question, questionnaire=cls.general_questionnaire, type="L")
-        cls.general_grade_question = mommy.make(Question, questionnaire=cls.general_questionnaire, type="G")
+        cls.general_text_question = mommy.make(Question, questionnaire=cls.course_questionnaire, type="T")
+        cls.general_likert_question = mommy.make(Question, questionnaire=cls.course_questionnaire, type="L")
+        cls.general_grade_question = mommy.make(Question, questionnaire=cls.course_questionnaire, type="G")
 
         cls.contribution1 = mommy.make(Contribution, contributor=cls.contributor1, questionnaires=[cls.contributor_questionnaire],
                                        course=cls.course)
         cls.contribution2 = mommy.make(Contribution, contributor=cls.contributor2, questionnaires=[cls.contributor_questionnaire],
                                        course=cls.course)
 
-        cls.course.general_contribution.questionnaires.set([cls.general_questionnaire])
+        cls.course.general_contribution.questionnaires.set([cls.course_questionnaire])
 
     def fill_form(self, form, fill_complete):
-        form[question_id(self.course.general_contribution, self.general_questionnaire, self.general_text_question)] = "some text"
-        form[question_id(self.course.general_contribution, self.general_questionnaire, self.general_grade_question)] = 3
-        form[question_id(self.course.general_contribution, self.general_questionnaire, self.general_likert_question)] = 1
+        form[question_id(self.course.general_contribution, self.course_questionnaire, self.general_text_question)] = "some text"
+        form[question_id(self.course.general_contribution, self.course_questionnaire, self.general_grade_question)] = 3
+        form[question_id(self.course.general_contribution, self.course_questionnaire, self.general_likert_question)] = 1
 
         form[question_id(self.contribution1, self.contributor_questionnaire, self.contributor_text_question)] = "some other text"
         form[question_id(self.contribution1, self.contributor_questionnaire, self.contributor_likert_question)] = 4
@@ -74,9 +74,9 @@ class TestVoteView(ViewTest):
         self.assertIn("vote for all rating questions", response)
 
         form = page.forms["student-vote-form"]
-        self.assertEqual(form[question_id(self.course.general_contribution, self.general_questionnaire, self.general_text_question)].value, "some text")
-        self.assertEqual(form[question_id(self.course.general_contribution, self.general_questionnaire, self.general_likert_question)].value, "1")
-        self.assertEqual(form[question_id(self.course.general_contribution, self.general_questionnaire, self.general_grade_question)].value, "3")
+        self.assertEqual(form[question_id(self.course.general_contribution, self.course_questionnaire, self.general_text_question)].value, "some text")
+        self.assertEqual(form[question_id(self.course.general_contribution, self.course_questionnaire, self.general_likert_question)].value, "1")
+course        self.assertEqual(form[question_id(self.course.general_contribution, self.course_questionnaire, self.general_grade_question)].value, "3")
 
         self.assertEqual(form[question_id(self.contribution1, self.contributor_questionnaire, self.contributor_text_question)].value, "some other text")
         self.assertEqual(form[question_id(self.contribution1, self.contributor_questionnaire, self.contributor_likert_question)].value, "4")

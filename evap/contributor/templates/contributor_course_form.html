@@ -17,7 +17,7 @@
     <form method="POST" class="form-horizontal multiselect-form select2form" id="course-form">
         {% csrf_token %}
 
-        {% include 'course_form_general_questions.html' with course=course course_form=form %}
+        {% include 'course_form_course_questions.html' with course=course course_form=form %}
 
         {% include 'contribution_formset.html' with formset=formset staff=False editable=editable%}
 

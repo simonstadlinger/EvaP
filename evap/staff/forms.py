@@ -123,7 +123,7 @@ class CourseTypeMergeSelectionForm(forms.Form):
 
 
 class CourseForm(forms.ModelForm):
-    general_questions = forms.ModelMultipleChoiceField(
+    course_questions = forms.ModelMultipleChoiceField(
         Questionnaire.objects.filter(is_for_contributors=False, obsolete=False),
         widget=CheckboxSelectMultiple,
         label=_("Questions about the course")
@@ -140,7 +140,7 @@ class CourseForm(forms.ModelForm):
     class Meta:
         model = Course
         fields = ('name_de', 'name_en', 'type', 'degrees', 'is_graded', 'is_private', 'is_required_for_reward', 'vote_start_datetime',
-                  'vote_end_date', 'participants', 'general_questions', 'last_modified_time_2', 'last_modified_user_2', 'semester')
+                'vote_end_date', 'participants', 'course_questions', 'last_modified_time_2', 'last_modified_user_2', 'semester')
         localized_fields = ('vote_start_datetime', 'vote_end_date')
         field_classes = {
             'participants': UserModelMultipleChoiceField,
@@ -149,13 +149,13 @@ class CourseForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.fields['general_questions'].queryset = Questionnaire.objects.filter(is_for_contributors=False).filter(
+        self.fields['course_questions'].queryset = Questionnaire.objects.filter(is_for_contributors=False).filter(
             Q(obsolete=False) | Q(contributions__course=self.instance)).distinct()
 
         self.fields['participants'].queryset = UserProfile.objects.exclude_inactive_users()
 
         if self.instance.general_contribution:
-            self.fields['general_questions'].initial = [q.pk for q in self.instance.general_contribution.questionnaires.all()]
+            self.fields['course_questions'].initial = [q.pk for q in self.instance.general_contribution.questionnaires.all()]
 
         self.fields['last_modified_time_2'].initial = self.instance.last_modified_time
         if self.instance.last_modified_user:
@@ -192,7 +192,7 @@ class CourseForm(forms.ModelForm):
     def save(self, user, *args, **kw):
         self.instance.last_modified_user = user
         super().save(*args, **kw)
-        self.instance.general_contribution.questionnaires.set(self.cleaned_data.get('general_questions'))
+        self.instance.general_contribution.questionnaires.set(self.cleaned_data.get('course_questions'))
         logger.info('Course "{}" (id {}) was edited by staff member {}.'.format(self.instance, self.instance.id, user.username))
 
 
